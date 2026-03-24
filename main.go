@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
-	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -44,15 +44,18 @@ func main() {
 
 	for _, file := range flag.Args() {
 		for le := range LogLines(file, re) {
-			if class == "" || le.class == class {
-				if level == "" || le.level == level {
-					if searchRe == nil || searchRe.MatchString(le.line) {
-						fmt.Print(le.line)
-						if lines {
-							fmt.Println("--------------------------------------------------------------------------------")
-						}
-					}
-				}
+			if !(class == "" || le.class == class) {
+				continue
+			}
+			if !(level == "" || le.level == level) {
+				continue
+			}
+			if !(searchRe == nil || searchRe.MatchString(le.line)) {
+				continue
+			}
+			fmt.Print(le.line)
+			if lines {
+				fmt.Println("--------------------------------------------------------------------------------")
 			}
 		}
 	}
@@ -66,17 +69,22 @@ type LogEntry struct {
 }
 
 func LogLines(path string, re *regexp.Regexp) func(func(LogEntry) bool) {
-	lines := readFile(path)
-	var nextEntry LogEntry
-	var sb strings.Builder
-
-	start, logEntry := findFirstEntry(lines, re)
-
 	return func(yield func(LogEntry) bool) {
-		for i := start + 1; i < len(lines); i++ {
-			if match := re.FindStringSubmatch(lines[i]); match != nil {
-				nextEntry = getEntry(match)
+		var nextEntry LogEntry
+		var sb strings.Builder
 
+		file, err := os.Open(path)
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+
+		scanner := bufio.NewScanner(file)
+		logEntry := findFirstEntry(scanner, re)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if match := re.FindStringSubmatch(line); match != nil {
+				nextEntry = getEntry(match)
 				logEntry.line = sb.String()
 				if !yield(logEntry) {
 					return
@@ -84,7 +92,7 @@ func LogLines(path string, re *regexp.Regexp) func(func(LogEntry) bool) {
 				logEntry = nextEntry
 				sb.Reset()
 			}
-			sb.WriteString(lines[i])
+			sb.WriteString(line)
 			sb.WriteRune('\n')
 		}
 		logEntry.line = sb.String()
@@ -92,22 +100,15 @@ func LogLines(path string, re *regexp.Regexp) func(func(LogEntry) bool) {
 	}
 }
 
-func readFile(path string) []string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	return strings.Split(string(b), "\n")
-}
-
-func findFirstEntry(lines []string, re *regexp.Regexp) (start int, logEntry LogEntry) {
-	for i, line := range lines {
+func findFirstEntry(scanner *bufio.Scanner, re *regexp.Regexp) LogEntry {
+	for scanner.Scan() {
+		line := scanner.Text()
 		if match := re.FindStringSubmatch(line); match != nil {
 			entry := getEntry(match)
-			return i, entry
+			return entry
 		}
 	}
-	return math.MaxInt - 1, LogEntry{}
+	return LogEntry{}
 }
 
 func getEntry(match []string) LogEntry {
